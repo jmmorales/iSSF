@@ -1,0 +1,159 @@
+---
+title: "Fisher"
+output: html_document
+date: "2023-02-22"
+---
+
+This stuff is modified from  [RSF and SSF analysis of fisher. "S. Muff, J. Signer, J. Fieberg"](https://conservancy.umn.edu/bitstream/handle/11299/204737/fisher_rsf_and_ssf.R?sequence=26&isAllowed=y)
+
+and
+
+https://conservancy.umn.edu/bitstream/handle/11299/218272/AppB_SSF_examples.html?sequence=26
+
+The data are from - LaPoint, S., Gallery, P., Wikelski, M. and Kays, R. (2013). Animal behavior, cost-based corridor models, and real corridors. Landscape Ecology, 28, 1615-1630.
+
+
+```{r}
+library(tidyverse)
+library(raster)
+library(rgdal)
+library(amt)
+library(cmdstanr)
+```
+
+
+#' Now lets start by reading in the simplified fisher data
+```{r}
+dat <- read_csv("fisher_data.csv")
+```
+
+Include sex of each animal and create tracks with an appropriate coordinate reference system using the amt package
+
+```{r}
+dat_all <- dat %>% nest(-id) 
+dat_all$sex <- c("f", "f", "f", "m", "m", "m")
+dat_all <- dat_all %>% 
+  mutate(trk = map(data, function(d) {
+    make_track(d, x, y, t, crs = sp::CRS("+init=epsg:4326")) %>% 
+      transform_coords(sp::CRS("+init=epsg:5070"))
+  }))
+```
+
+Summarize sampling rates, 
+```{r}
+dat_all %>% mutate(sr = lapply(trk, summarize_sampling_rate)) %>% 
+  select(id, sr) %>% unnest
+
+#' 10 minutes seems to appropriate for all animals.
+#' Resample the track to 10 minutes with a tolerance of 2 minutes.
+
+dat1 <- dat_all %>% mutate(dat_clean = map(trk, ~ {
+  .x %>% track_resample(rate = minutes(10), tolerance = seconds(120))
+  }))
+
+```
+
+Read in the landuse raster and reclassify to two categories (wet forests and other).
+```{r}
+landuse <- amt_fisher_covar$landuse
+elevation <- amt_fisher_covar$elevation
+popden <- amt_fisher_covar$popden
+reclass_landuse <- function(x) {
+  fct_collapse(factor(x),
+               forest = c("30","40","50","60", "70","80", "90","100"),
+               grass = c("120", "140"),
+               wet = c("160"))
+}
+
+```
+
+
+## Step-Selection Function (SSF)
+
+Data development for step-selection function
+
+First we need to prepare the data. We need to pair each observed point with 10 random points and extract the covariate value at the end point of each step.
+
+```{r}
+
+#+ warning = FALSE
+dat_ssf <- dat1 %>% 
+  mutate(stps = map(dat_clean, ~ .x %>% 
+                      steps_by_burst() %>% 
+                      random_steps() %>% 
+                      extract_covariates(wet_forests) %>%
+                      extract_covariates(elevation) %>%
+                      extract_covariates(popden))) %>% 
+  select(id, stps) %>% unnest() %>% 
+  mutate(
+    y = as.numeric(case_),
+    id = as.numeric(factor(id)), 
+    step_id = paste0(id, step_id_, sep = "-"))
+
+```
+
+
+```{r}
+
+tmp = which(is.na(dat_ssf$elevation))
+dat_ssf = dat_ssf[-tmp,]
+tmp = which(is.na(dat_ssf$popden))
+dat_ssf = dat_ssf[-tmp,]
+dat_ssf$id = as.numeric(as.factor(dat_ssf$id))
+
+x = matrix(NA, nrow(dat_ssf), 3)
+x[,1] = dat_ssf$layer
+x[,2] = scale(dat_ssf$elevation)
+x[,3] = scale(dat_ssf$popden)
+
+tmp = as.numeric(as.factor(dat_ssf$step_id))
+tmp1 = numeric(length(tmp))
+
+tmp1[1] = 1
+for(i in 2:length(tmp)){
+  tmp1[i] = tmp1[i-1]
+  if(tmp[i] != tmp[i-1]){
+    tmp1[i] = tmp1[i]+1
+  }
+}
+```
+
+
+```{r}
+stan_dat <- list(N = nrow(dat_ssf), 
+                 I = length(unique(dat_ssf$step_id)), 
+                 J = length(unique(dat_ssf$id)), 
+                 y = dat_ssf$y, 
+                 x = x, 
+                 K = ncol(x),
+                 stepid = tmp1, 
+                 indid = dat_ssf$id)
+```
+
+
+```{r}
+mod = cmdstan_model('PoissonSSF.stan')
+```
+
+```{r}
+init_fun <- function() list(a_re = rep(0, length(unique(dat_ssf$step_id))),
+                               beta_p = matrix(0,5,3))
+```
+
+
+```{r}
+fit = mod$sample(
+  data = stan_dat,
+  init = init_fun,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1)
+```
+
+```{r}
+pars = c("beta_p", "beta")
+fit_summary = fit$summary(pars)
+```
+
