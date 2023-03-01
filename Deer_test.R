@@ -3,6 +3,7 @@
 library(lubridate)
 library(amt)
 library(cmdstanr)
+
 data("deer")
 deer
 
@@ -12,10 +13,9 @@ data("sh_forest")
 
 ssf1 <- deer %>% steps_by_burst()
 
-ssf1 <- ssf1 %>% random_steps(n_control = 10)
-
+ncontrol = 9
+ssf1 <- ssf1 %>% random_steps(n_control = ncontrol)
 ssf1 <- ssf1 %>% extract_covariates(sh_forest) 
-
 ssf1 <- ssf1 %>% 
   mutate(forest = factor(sh.forest, levels = 1:2, labels = c("forest", "non-forest")), 
          cos_ta = cos(ta_), 
@@ -23,47 +23,79 @@ ssf1 <- ssf1 %>%
 
 head(ssf1)
 
-stan_dat <- list(N = nrow(ssf1), 
-                 n_events = length(unique(ssf1$step_id_)),
+# simple model -----------------------------------------------------------------
+
+m0 <- ssf1 %>% fit_clogit(case_ ~ forest + strata(step_id_))
+
+# Stan clogit version
+stan_dat0 <- list(N = nrow(ssf1), 
+                 n_steps = length(unique(ssf1$step_id_)),
                  n_coef = 1,
                  step_id = ssf1$step_id_,
                  y = as.numeric(ssf1$case_), 
                  x = matrix(as.numeric(ssf1$forest), 
                             nrow = nrow(ssf1), 1),
-                 n_group = 11
+                 n_group = ncontrol + 1
 )
 
-mod <- cmdstan_model('issf_test.stan')
+modclogit <- cmdstan_model('clogit.stan')
 
-fit <- mod$sample(
-  data = stan_dat,
-  #seed = 123,
+fit0cl <- modclogit$sample(
+  data = stan_dat0,
+  seed = 123,
   chains = 4,
   parallel_chains = 4,
-  #output_dir = "C:\\Users\\jm361n\\uruguay",
   iter_warmup = 1000,
   iter_sampling = 1000,
   thin = 1,
-  refresh = 200 # print update every 500 iters
+  refresh = 200
 )
 
-#-------------------
 
-stan_dat <- list(N = nrow(ssf1), 
-                 n_grp = length(unique(ssf1$step_id_)),
-                 n_coef = 1,
-                 grp = ssf1$step_id_,
+# Stan multinomial version
+modmulti <- cmdstan_model('issf_multi.stan')
+
+fit0multi <- modmulti$sample(
+  data = stan_dat0,
+  seed = 123,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1,
+  refresh = 200
+)
+
+coef(m0)
+
+fit0cl$time()$total
+fit0cl$summary()$mean[2]
+
+fit0multi$time()$total
+fit0multi$summary()$mean[2]
+
+#-------------------------------------------------------------------------------
+
+m1 <- fit_issf(case_ ~ forest + 
+             sl_ + log_sl + 
+             strata(step_id_), model = TRUE, data = ssf1)
+
+
+x = model.matrix(~ forest + sl_ +  log_sl , data = ssf1)
+x = x[, 2:ncol(x)]
+
+stan_dat1 <- list(N = nrow(ssf1), 
+                 n_steps = length(unique(ssf1$step_id_)),
+                 n_coef = ncol(x),
+                 step_id = ssf1$step_id_,
                  y = as.numeric(ssf1$case_), 
-                 x = matrix(as.numeric(ssf1$forest), 
-                            nrow = nrow(ssf1), 1),
-                 n_group = 11,
-                 n_case = 1
+                 x = x,
+                 n_group = ncontrol + 1
 )
 
-mod <- cmdstan_model('clogit.stan')
 
-fit <- mod$sample(
-  data = stan_dat,
+fit1cl <- modclogit$sample(
+  data = stan_dat1,
   #seed = 123,
   chains = 4,
   parallel_chains = 4,
@@ -74,14 +106,35 @@ fit <- mod$sample(
   refresh = 200 # print update every 500 iters
 )
 
+fit1multi <- modmulti$sample(
+  data = stan_dat1,
+  seed = 123,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1,
+  refresh = 200
+)
+
+coef(m1)
+
+fit1cl$time()$total
+fit1cl$summary()$mean[2:4]
+
+fit1multi$time()$total
+fit1multi$summary()$mean[2:4]
 
 
-
-
-
-matrix[N, n_coef] x;    // Matrix of regressors
-int n_group[n_events];     // number of observations in each group
-int n_case[n_events];      // number of cases in each group
+stan_dat1 <- list(N = nrow(ssf1), 
+                  n_grp = length(unique(ssf1$step_id_)),
+                  n_coef = 1,
+                  grp = ssf1$step_id_,
+                  y = as.numeric(ssf1$case_), 
+                  x = x,
+                  n_group = ncontrol + 1,
+                  n_case = 1
+)
 
 
 m0 <- ssf1 %>% fit_clogit(case_ ~ forest + strata(step_id_))
