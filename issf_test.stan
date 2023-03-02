@@ -28,7 +28,7 @@ model {
     array[n_group] int y_g;
     vector[n_group] xb_g;
 
-    y_g = segment(y, ix, n_group);
+    //y_g = segment(y, ix, n_group);
     xb_g = segment(xb, ix, n_group);
     
     //target += bernoulli_lpmf(1|log(xb_g[1]) - log_sum_exp(xb_g));
