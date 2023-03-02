@@ -38,6 +38,19 @@ stan_dat0 <- list(N = nrow(ssf1),
                  n_group = ncontrol + 1
 )
 
+mod <- cmdstan_model('issf_test.stan')
+
+fit0 <- mod$sample(
+  data = stan_dat0,
+  seed = 123,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1,
+  refresh = 200
+)
+
 modclogit <- cmdstan_model('clogit.stan')
 
 fit0cl <- modclogit$sample(
@@ -117,6 +130,17 @@ fit1multi <- modmulti$sample(
   refresh = 200
 )
 
+fit1 <- mod$sample(
+  data = stan_dat1,
+  seed = 123,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1,
+  refresh = 200
+)
+
 coef(m1)
 
 fit1cl$time()$total
@@ -125,16 +149,9 @@ fit1cl$summary()$mean[2:4]
 fit1multi$time()$total
 fit1multi$summary()$mean[2:4]
 
+fit1$time()$total
+fit1$summary()$mean[2:4]
 
-stan_dat1 <- list(N = nrow(ssf1), 
-                  n_grp = length(unique(ssf1$step_id_)),
-                  n_coef = 1,
-                  grp = ssf1$step_id_,
-                  y = as.numeric(ssf1$case_), 
-                  x = x,
-                  n_group = ncontrol + 1,
-                  n_case = 1
-)
 
 
 m0 <- ssf1 %>% fit_clogit(case_ ~ forest + strata(step_id_))
