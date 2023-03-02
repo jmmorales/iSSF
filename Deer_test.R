@@ -17,7 +17,8 @@ ncontrol = 9
 ssf1 <- ssf1 %>% random_steps(n_control = ncontrol)
 ssf1 <- ssf1 %>% extract_covariates(sh_forest) 
 ssf1 <- ssf1 %>% 
-  mutate(forest = factor(sh.forest, levels = 1:2, labels = c("forest", "non-forest")), 
+  mutate(forest = factor(sh.forest, levels = 1:2, 
+                         labels = c("forest", "non-forest")), 
          cos_ta = cos(ta_), 
          log_sl = log(sl_)) 
 
@@ -37,6 +38,21 @@ stan_dat0 <- list(N = nrow(ssf1),
                             nrow = nrow(ssf1), 1),
                  n_group = ncontrol + 1
 )
+
+
+modp <- cmdstan_model('PoissonSSF.stan')
+
+fit0p <- modp$sample(
+  data = stan_dat0,
+  seed = 123,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1,
+  refresh = 200
+)
+
 
 modclogit <- cmdstan_model('clogit.stan')
 
@@ -81,6 +97,9 @@ fit0 <- mod$sample(
 )
 
 coef(m0)
+
+fit0p$time()$total
+fit0p$summary("beta")
 
 fit0cl$time()$total
 fit0cl$summary()$mean[2]
