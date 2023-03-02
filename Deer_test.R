@@ -38,19 +38,6 @@ stan_dat0 <- list(N = nrow(ssf1),
                  n_group = ncontrol + 1
 )
 
-mod <- cmdstan_model('issf_test.stan')
-
-fit0 <- mod$sample(
-  data = stan_dat0,
-  seed = 123,
-  chains = 4,
-  parallel_chains = 4,
-  iter_warmup = 1000,
-  iter_sampling = 1000,
-  thin = 1,
-  refresh = 200
-)
-
 modclogit <- cmdstan_model('clogit.stan')
 
 fit0cl <- modclogit$sample(
@@ -79,6 +66,20 @@ fit0multi <- modmulti$sample(
   refresh = 200
 )
 
+# Bernoulli
+mod <- cmdstan_model('issf_test.stan')
+
+fit0 <- mod$sample(
+  data = stan_dat0,
+  seed = 123,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  thin = 1,
+  refresh = 200
+)
+
 coef(m0)
 
 fit0cl$time()$total
@@ -86,6 +87,9 @@ fit0cl$summary()$mean[2]
 
 fit0multi$time()$total
 fit0multi$summary()$mean[2]
+
+fit0$time()$total
+fit0$summary()$mean[2]
 
 #-------------------------------------------------------------------------------
 
